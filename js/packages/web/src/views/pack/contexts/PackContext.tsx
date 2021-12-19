@@ -7,10 +7,9 @@ import {
 } from '@oyster/common';
 import { ProvingProcess } from '@oyster/common/dist/lib/models/packs/accounts/ProvingProcess';
 import { useWallet } from '@solana/wallet-adapter-react';
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { useParams, useLocation } from 'react-router';
 
-import { useUserVouchersByEdition } from './hooks/useUserVouchersByEdition';
 import { claimPackCards } from '../transactions/claimPackCards';
 
 import { getProvingProcess } from './utils/getProvingProcess';
@@ -22,12 +21,11 @@ import { useOpenedMetadata } from './hooks/useOpenedMetadata';
 import { PackContextProps } from './interface';
 import { useListenForProvingProcess } from './hooks/useListenForProvingProcess';
 import { fetchProvingProcessWithRetry } from './utils/fetchProvingProcessWithRetry';
-import { useListenForTokenAccounts } from './hooks/useListenForTokenAccounts';
 
 export const PackContext = React.createContext<PackContextProps>({
   isLoading: false,
   packKey: '',
-  voucherEditionKey: '',
+  voucherMint: '',
   openedMetadata: [],
   metadataByPackCard: {},
   handleOpenPack: () => Promise.resolve(),
@@ -39,9 +37,7 @@ export const PackProvider: React.FC = ({ children }) => {
   const connection = useConnection();
   const { packKey }: { packKey: string } = useParams();
   const { search } = useLocation();
-  const { voucherEditionKey, provingProcessKey } = getSearchParams(search);
-
-  useListenForTokenAccounts();
+  const { voucherMint, provingProcessKey } = getSearchParams(search);
 
   const {
     packs,
@@ -53,7 +49,6 @@ export const PackProvider: React.FC = ({ children }) => {
     vouchers,
   } = useMeta();
   const { accountByMint, userAccounts } = useUserAccounts();
-  const userVouchers = useUserVouchersByEdition();
   const metadataByPackCard = useMetadataByPackCard(packKey);
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -64,16 +59,11 @@ export const PackProvider: React.FC = ({ children }) => {
     useState<ParsedAccount<ProvingProcess>>();
   const [redeemModalMetadata, setRedeemModalMetadata] = useState<string[]>([]);
 
-  const voucherMetadata = useMemo(
-    () => metadata.find(meta => meta?.info?.edition === voucherEditionKey),
-    [metadata, voucherEditionKey],
+  const voucherMetadata = metadata.find(
+    meta => meta?.info?.mint === voucherMint,
   );
-  const voucher = useMemo(
-    () =>
-      Object.values(vouchers).find(
-        voucher => voucher?.info?.packSet === packKey,
-      ),
-    [vouchers, packKey],
+  const voucher = Object.values(vouchers).find(
+    voucher => voucher?.info?.packSet === packKey,
   );
 
   const cardsRedeemed = provingProcess?.info?.cardsRedeemed || 0;
@@ -90,9 +80,9 @@ export const PackProvider: React.FC = ({ children }) => {
   const handleOpenPack = async () => {
     const newProvingProcess = await getProvingProcess({
       pack,
-      voucherEditionKey,
-      provingProcessKey,
-      userVouchers,
+      provingProcess,
+      voucherMint,
+      vouchers,
       accountByMint,
       connection,
       wallet,
@@ -100,7 +90,7 @@ export const PackProvider: React.FC = ({ children }) => {
     setProvingProcess(newProvingProcess);
 
     const {
-      info: { cardsToRedeem, voucherMint },
+      info: { cardsToRedeem },
       pubkey,
     } = newProvingProcess;
 
@@ -117,7 +107,7 @@ export const PackProvider: React.FC = ({ children }) => {
     await claimPackCards({
       wallet,
       connection,
-      voucherMint,
+      voucherMint: newProvingProcess.info.voucherMint,
       cardsToRedeem,
       metadataByPackCard,
       packCards,
@@ -140,6 +130,8 @@ export const PackProvider: React.FC = ({ children }) => {
   const handleFetch = async () => {
     setIsLoading(true);
 
+    setRedeemModalMetadata([]);
+
     await pullPackPage(userAccounts, packKey);
 
     const initialProvingProcess = getInitialProvingProcess({
@@ -150,6 +142,8 @@ export const PackProvider: React.FC = ({ children }) => {
 
     if (initialProvingProcess) {
       setProvingProcess(initialProvingProcess);
+    } else {
+      setProvingProcess(undefined);
     }
 
     setIsLoading(false);
@@ -168,7 +162,7 @@ export const PackProvider: React.FC = ({ children }) => {
       value={{
         isLoading,
         packKey,
-        voucherEditionKey,
+        voucherMint,
         voucherMetadataKey,
         openedMetadata,
         pack,
